@@ -2333,22 +2333,8 @@ static void entry_key_search (const struct iface_key *k)
 
 		iface_entry_disable ();
 
-		if (text[0]) {
-
-			if (!strcmp(file, "..")) {
-				free (file);
-				file = dir_up (cwd);
-			}
-
-			if (is_url(file))
-				play_from_url (file);
-			else if (file_type(file) == F_DIR)
-				go_to_dir (file, 0);
-			else if (file_type(file) == F_PLAYLIST)
-				go_to_playlist (file, 0, false);
-			else
-				play_it (file);
-		}
+		if (text[0])
+			iface_select_file(file);
 
 		free (text);
 		free (file);
