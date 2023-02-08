@@ -96,7 +96,7 @@ extern char **environ;
 
 static void write_pid_file ()
 {
-	char *fname = create_file_name (PID_FILE);
+	char *fname = create_local_file_name (PID_FILE);
 	FILE *file;
 
 	if ((file = fopen(fname, "w")) == NULL)
@@ -110,7 +110,7 @@ static pid_t check_pid_file ()
 {
 	FILE *file;
 	pid_t pid;
-	char *fname = create_file_name (PID_FILE);
+	char *fname = create_local_file_name (PID_FILE);
 
 	/* Read the pid file */
 	if ((file = fopen(fname, "r")) == NULL)
@@ -367,7 +367,7 @@ void server_init (int debugging, int foreground)
 				" with pid %d.\n", pid);
 		fprintf (stderr, "If it is not true, remove the pid file (%s)"
 				" and try again.\n",
-				create_file_name(PID_FILE));
+				create_local_file_name(PID_FILE));
 		fatal ("Exiting!");
 	}
 
@@ -713,7 +713,7 @@ static void server_shutdown ()
 	logit ("Running OnServerStop");
 	run_extern_cmd ("OnServerStop");
 	unlink (socket_name());
-	unlink (create_file_name(PID_FILE));
+	unlink (create_local_file_name(PID_FILE));
 	close (wake_up_pipe[0]);
 	close (wake_up_pipe[1]);
 	logit ("Server exited");

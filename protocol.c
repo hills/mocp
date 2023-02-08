@@ -62,7 +62,7 @@ struct packet_buf
 /* Create a socket name, return NULL if the name could not be created. */
 char *socket_name ()
 {
-	char *socket_name = create_file_name (SOCKET_NAME);
+	char *socket_name = create_local_file_name (SOCKET_NAME);
 
 	if (strlen(socket_name) > UNIX_PATH_MAX)
 		fatal ("Can't create socket name!");

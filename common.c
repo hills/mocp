@@ -24,6 +24,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <pwd.h>
 #include <pthread.h>
@@ -359,6 +360,37 @@ char *create_file_name (const char *file)
 
 	if (rc >= ssizeof(fname))
 		fatal ("Path too long!");
+
+	return fname;
+}
+
+/* As above but guaranteed to system temporary file, not network home dir */
+char *create_local_file_name (const char *file)
+{
+	int rc;
+	static char dname[PATH_MAX], fname[PATH_MAX];
+	uid_t uid = getuid();
+	const char *tmp = getenv("TMPDIR");
+
+	if (!tmp)
+		tmp = "/tmp";
+
+	rc = snprintf(dname, sizeof(dname), "%s/mocp.%u", tmp, uid);
+
+	if (rc >= ssizeof(dname))
+		fatal ("Local directory path too long!");
+
+	rc = mkdir (dname, 0700);
+
+	if (rc == -1 && errno != EEXIST) {
+		char *err = xstrerror (errno);
+		fatal ("Can't create directory %s: %s", dname, err);
+	}
+
+	rc = snprintf(fname, sizeof(fname), "%s/%s", dname, file);
+
+	if (rc >= sizeof(fname))
+		fatal ("Local file path too long!");
 
 	return fname;
 }
