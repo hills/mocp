@@ -1,0 +1,4 @@
+#!/bin/sh
+
+autoreconf -fi -I /usr/share/gettext/m4
+echo "Now run ./configure" >&2
