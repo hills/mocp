@@ -90,15 +90,13 @@ AC_CHECK_FUNCS([nl_langinfo])
 
 dnl CODESET (taken from vim)
 AC_MSG_CHECKING(for nl_langinfo(CODESET))
-AC_TRY_LINK([
+AC_LINK_IFELSE([AC_LANG_PROGRAM([[
 	     #ifdef HAVE_LANGINFO_H
 	     # include <langinfo.h>
 	     #endif
-	     ], [char *cs = nl_langinfo(CODESET);],
-	     AC_MSG_RESULT(yes)
-	     AC_DEFINE([HAVE_NL_LANGINFO_CODESET], 1,
-		       [Define if you have CODESET constant]),
-	     AC_MSG_RESULT(no))
+	     ]], [[char *cs = nl_langinfo(CODESET);]])],[AC_MSG_RESULT(yes)
+	     AC_DEFINE(HAVE_NL_LANGINFO_CODESET, 1,
+		       Define if you have CODESET constant)],[AC_MSG_RESULT(no)])
 
 AC_C_BIGENDIAN
 
