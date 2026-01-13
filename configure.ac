@@ -104,19 +104,7 @@ AC_C_BIGENDIAN
 
 AC_C_CONST
 AC_TYPE_INTPTR_T
-AX_CFLAGS_GCC_OPTION(-Wall)
-AX_CFLAGS_GCC_OPTION(-Wextra)
-
-dnl Overly-enthusiastic warning suppression.
-save_CFLAGS="$CFLAGS"
-AX_CFLAGS_GCC_OPTION([-Wgnu-zero-variadic-macro-arguments], ,
-                     AC_DEFINE([HAVE_VARIADIC_MACRO_WARNING], 1,
-                               [Define if compiler recognises warning option]))
-AX_CFLAGS_GCC_OPTION([-Werror=unknown-warning-option])
-AX_CFLAGS_GCC_OPTION([-Wformat-truncation], ,
-                     AC_DEFINE([HAVE_FORMAT_TRUNCATION_WARNING], 1,
-                               [Define if compiler recognises warning option]))
-CFLAGS="$save_CFLAGS"
+AX_APPEND_FLAG([-Wall -Wextra], CFLAGS)
 
 PKG_PROG_PKG_CONFIG([0.20])
 
@@ -244,13 +232,12 @@ then
 else
 	if test "x$enable_debug" = "xgdb"
 	then
-		AX_CFLAGS_GCC_OPTION([-ggdb])
-		AX_CFLAGS_GCC_OPTION([-O0])
+                AX_APPEND_FLAG([-ggdb -O0], CFLAGS)
 		COMPILE_DEBUG='gdb'
 	fi
 	if test "x$ac_cv_cflags_gcc_option__ggdb" = "x"
 	then
-		AX_CFLAGS_GCC_OPTION([-g])
+                AX_APPEND_FLAG([-g], CFLAGS)
 		COMPILE_DEBUG='yes'
 	fi
 	EXTRA_OBJS="$EXTRA_OBJS null_out.o md5.o"
