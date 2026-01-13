@@ -2,13 +2,18 @@ AC_INIT([Music On Console],[2.6-alpha3],[mocmaint@daper.net],[moc],
                            [http://moc.daper.net/])
 AC_CONFIG_SRCDIR([main.c])
 AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_MACRO_DIRS([m4])
+
+LT_INIT([dlopen])
+LT_CONFIG_LTDL_DIR([libltdl])
+LTDL_INIT
 
 AM_INIT_AUTOMAKE([dist-xz no-dist-gzip])
 
 AC_PREREQ([2.64])
 
 AC_CANONICAL_HOST
-AC_PROG_CC_C99
+AC_LANG([C])
 AC_PROG_CXX
 AC_PROG_INSTALL
 
@@ -31,11 +36,8 @@ AC_EGREP_CPP(posix_2001_compatible,
              [AC_MSG_ERROR([A POSIX.1-2001 compatible system is required.])])
 
 AC_PROG_AWK
-AC_LIBTOOL_DLOPEN
 AC_DISABLE_STATIC
 AC_ENABLE_SHARED
-AC_PROG_LIBTOOL
-AC_LIB_LTDL
 
 AC_SUBST([EXTRA_OBJS])
 
@@ -458,10 +460,11 @@ AC_SUBST(EXTRA_LIBS)
 AC_SUBST(EXTRA_DISTS)
 AH_BOTTOM([#include "compiler.h"])
 
-AC_OUTPUT([Makefile
+AC_CONFIG_FILES([Makefile
 	  themes/Makefile
 	  config.example
 	  ])
+AC_OUTPUT
 
 echo
 echo "-----------------------------------------------------------------------"
