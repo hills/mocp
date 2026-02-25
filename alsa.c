@@ -62,8 +62,6 @@ static struct
 static snd_pcm_uframes_t buffer_frames;
 static snd_pcm_uframes_t chunk_frames;
 static int chunk_bytes = -1;
-static char alsa_buf[512 * 1024];
-static int alsa_buf_fill = 0;
 static int bytes_per_frame;
 static int bytes_per_sample;
 
@@ -166,8 +164,7 @@ static snd_pcm_hw_params_t *alsa_open_device (const char *device)
 
 	assert (!handle);
 
-	rc = snd_pcm_open (&handle, device, SND_PCM_STREAM_PLAYBACK,
-	                                    SND_PCM_NONBLOCK);
+	rc = snd_pcm_open (&handle, device, SND_PCM_STREAM_PLAYBACK, 0);
 	if (rc < 0) {
 		error_errno ("Can't open audio", rc);
 		goto err1;
@@ -644,67 +641,12 @@ static int alsa_open (struct sound_params *sound_params)
 	logit ("ALSA device opened");
 
 	params.channels = sound_params->channels;
-	alsa_buf_fill = 0;
 	result = 1;
 
 err:
 	snd_pcm_hw_params_free (hw_params);
 
 	return result;
-}
-
-/* Play from alsa_buf as many chunks as possible. Move the remaining data
- * to the beginning of the buffer. Return the number of bytes written
- * or -1 on error. */
-static int play_buf_chunks ()
-{
-	int written = 0;
-	bool zero_logged = false;
-
-	while (alsa_buf_fill >= chunk_bytes) {
-		int rc;
-
-		rc = snd_pcm_writei (handle, alsa_buf + written, chunk_frames);
-
-		if (rc == 0) {
-			if (!zero_logged) {
-				debug ("Played 0 bytes");
-				zero_logged = true;
-			}
-			continue;
-		}
-
-		zero_logged = false;
-
-		if (rc > 0) {
-			int written_bytes = rc * bytes_per_frame;
-
-			written += written_bytes;
-			alsa_buf_fill -= written_bytes;
-
-			debug ("Played %d bytes", written_bytes);
-			continue;
-		}
-
-		rc = snd_pcm_recover (handle, rc, 0);
-
-		switch (rc) {
-		case 0:
-			break;
-		case -EAGAIN:
-			if (snd_pcm_wait (handle, 500) < 0)
-				logit ("snd_pcm_wait() failed");
-			break;
-		default:
-			error_errno ("Can't play", rc);
-			return -1;
-		}
-	}
-
-	debug ("%d bytes remain in alsa_buf", alsa_buf_fill);
-	memmove (alsa_buf, alsa_buf + written, alsa_buf_fill);
-
-	return written;
 }
 
 static void alsa_close ()
@@ -748,30 +690,13 @@ static void alsa_close ()
 
 static int alsa_play (const char *buff, const size_t size)
 {
-	int to_write = size;
-	int buf_pos = 0;
+	int rc;
 
-	assert (chunk_bytes > 0);
-
-	debug ("Got %zu bytes to play", size);
-
-	while (to_write) {
-		int to_copy;
-
-		to_copy = MIN(to_write, ssizeof(alsa_buf) - alsa_buf_fill);
-		memcpy (alsa_buf + alsa_buf_fill, buff + buf_pos, to_copy);
-		to_write -= to_copy;
-		buf_pos += to_copy;
-		alsa_buf_fill += to_copy;
-
-		debug ("Copied %d bytes to alsa_buf (now filled with %d bytes)",
-				to_copy, alsa_buf_fill);
-
-		if (play_buf_chunks() < 0)
-			return -1;
+	rc = snd_pcm_writei (handle, buff, size / bytes_per_frame);
+	if (rc < 0) {
+		snd_pcm_recover (handle, rc, 0);
+		error_errno ("Can't play", rc);
 	}
-
-	debug ("Played everything");
 
 	return size;
 }
@@ -866,7 +791,6 @@ static int alsa_reset ()
 			break;
 		}
 
-		alsa_buf_fill = 0;
 		result = 1;
 	} while (0);
 
