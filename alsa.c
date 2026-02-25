@@ -659,32 +659,10 @@ err:
 
 static void alsa_close ()
 {
-	snd_pcm_sframes_t delay;
-
 	assert (handle != NULL);
 
-	/* play what remained in the buffer */
-	if (alsa_buf_fill > 0) {
-		unsigned int samples_required;
-
-		assert (alsa_buf_fill < chunk_bytes);
-
-		samples_required = (chunk_bytes - alsa_buf_fill) / bytes_per_sample;
-		snd_pcm_format_set_silence (params.format, alsa_buf + alsa_buf_fill,
-									samples_required);
-
-		alsa_buf_fill = chunk_bytes;
-		play_buf_chunks ();
-	}
-
-	/* Wait for ALSA buffers to empty.
-	 * Do not be tempted to use snd_pcm_nonblock() and snd_pcm_drain()
-	 * here; there are two bugs in ALSA which make it a bad idea (see
-	 * the SVN commit log for r2550).  Instead we sleep for the duration
-	 * of the still unplayed samples. */
-	if (snd_pcm_delay (handle, &delay) == 0 && delay > 0)
-		xsleep (delay, params.rate);
-	snd_pcm_close (handle);
+	snd_pcm_drain(handle);
+	snd_pcm_close(handle);
 	logit ("ALSA device closed");
 
 	params.format = 0;
