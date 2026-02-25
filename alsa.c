@@ -517,8 +517,8 @@ static int alsa_init (struct output_driver_caps *caps)
 
 static int alsa_open (struct sound_params *sound_params)
 {
-	int rc, result = 0;
-	unsigned int period_time, buffer_time;
+	int rc, result = 0, dir;
+	unsigned int buffer_time, periods;
 	char fmt_name[128];
 	const char *device;
 	snd_pcm_hw_params_t *hw_params;
@@ -581,26 +581,34 @@ static int alsa_open (struct sound_params *sound_params)
 
 	logit ("Set channels: %d", sound_params->channels);
 
-	rc = snd_pcm_hw_params_get_buffer_time_max (hw_params, &buffer_time, 0);
-	if (rc < 0) {
-		error_errno ("Can't get maximum buffer time", rc);
-		goto err;
-	}
+	/*
+	 * Large buffer minimises chance of buffer underrun or glitch
+	 */
 
-	buffer_time = MIN(buffer_time, BUFFER_MAX_USEC);
-	period_time = buffer_time / 4;
-
-	rc = snd_pcm_hw_params_set_period_time_near (handle, hw_params,
-	                                             &period_time, 0);
-	if (rc < 0) {
-		error_errno ("Can't set period time", rc);
-		goto err;
-	}
-
-	rc = snd_pcm_hw_params_set_buffer_time_near (handle, hw_params,
-	                                             &buffer_time, 0);
+	buffer_time = BUFFER_MAX_USEC;
+	dir = 0;
+	rc = snd_pcm_hw_params_set_buffer_time_max (handle, hw_params,
+	                                            &buffer_time, &dir);
 	if (rc < 0) {
 		error_errno ("Can't set buffer time", rc);
+		goto err;
+	}
+
+	rc = snd_pcm_hw_params_set_buffer_time_last (handle, hw_params,
+	                                             &buffer_time, &dir);
+	if (rc < 0) {
+		error_errno ("Can't set buffer time", rc);
+		goto err;
+	}
+
+	/*
+	 * Request fewer, larger transfers to minimise CPU overhead
+	 */
+
+	rc = snd_pcm_hw_params_set_periods_first (handle, hw_params,
+		                                  &periods, &dir);
+	if (rc < 0) {
+		error_errno ("Can't set periods", rc);
 		goto err;
 	}
 
