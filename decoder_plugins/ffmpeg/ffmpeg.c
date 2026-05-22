@@ -33,7 +33,9 @@
 #include <errno.h>
 
 #include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
 #include <libavutil/mathematics.h>
+#include <libavutil/opt.h>
 #if HAVE_LIBAVUTIL_CHANNEL_LAYOUT_H
 # include <libavutil/channel_layout.h>
 #else
@@ -66,6 +68,22 @@
 # define AV_CODEC_FLAG_TRUNCATED CODEC_FLAG_TRUNCATED
 #endif
 
+/* FFmpeg 5.1 (libavcodec 59.24.100) introduced AVChannelLayout and
+ * deprecated AVCodecContext.channels / channel_layout / request_channel_layout;
+ * FFmpeg 7.0 (libavcodec 61) removed them outright. */
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59,24,100)
+# define MOC_HAVE_CH_LAYOUT 1
+#endif
+
+static inline int moc_nb_channels (const AVCodecContext *ctx)
+{
+#ifdef MOC_HAVE_CH_LAYOUT
+	return ctx->ch_layout.nb_channels;
+#else
+	return ctx->channels;
+#endif
+}
+
 /* Set SEEK_IN_DECODER to 1 if you'd prefer seeking to be delay until
  * the next time ffmpeg_decode() is called.  This will provide seeking
  * in formats for which FFmpeg falsely reports seek errors, but could
@@ -78,7 +96,7 @@ struct ffmpeg_data
 	AVIOContext *pb;
 	AVStream *stream;
 	AVCodecContext *enc;
-	AVCodec *codec;
+	const AVCodec *codec;
 
 	char *remain_buf;
 	int remain_buf_len;
@@ -561,10 +579,19 @@ static bool is_seek_broken (struct ffmpeg_data *data)
 /* Downmix multi-channel audios to stereo. */
 static void set_downmixing (struct ffmpeg_data *data)
 {
+#ifdef MOC_HAVE_CH_LAYOUT
+	/* request_channel_layout was removed in FFmpeg 7. The modern
+	 * downmix path is via the "downmix" codec AVOption, but it is
+	 * codec-specific (mostly AC-3) and ignored elsewhere. MOC's
+	 * audio_conversion layer handles channel reduction anyway, so
+	 * here we just bail out for >2 channels and let it run. */
+	(void)data;
+#else
 	if (av_get_channel_layout_nb_channels (data->enc->channel_layout) <= 2)
 		return;
 
 	data->enc->request_channel_layout = AV_CH_LAYOUT_STEREO;
+#endif
 }
 
 static int ffmpeg_io_read_cb (void *s, uint8_t *buf, int count)
@@ -761,8 +788,10 @@ static void *ffmpeg_open_internal (struct ffmpeg_data *data)
 	}
 
 	set_downmixing (data);
+#if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(59,0,100)
 	if (data->codec->capabilities & AV_CODEC_CAP_TRUNCATED)
 		data->enc->flags |= AV_CODEC_FLAG_TRUNCATED;
+#endif
 
 	if (avcodec_open2 (data->enc, data->codec, NULL) < 0)
 	{
@@ -847,7 +876,7 @@ static int ffmpeg_can_decode (struct io_stream *stream)
 {
 	int res;
 	AVProbeData probe_data;
-	AVInputFormat *fmt;
+	const AVInputFormat *fmt;
 	char buf[8096 + AVPROBE_PADDING_SIZE] = {0};
 
 	res = io_peek (stream, buf, sizeof (buf));
@@ -1128,17 +1157,17 @@ static int decode_packet (struct ffmpeg_data *data, AVPacket *pkt,
 
 		is_planar = av_sample_fmt_is_planar (data->enc->sample_fmt);
 		packed = (char *)frame->extended_data[0];
-		packed_size = frame->nb_samples * data->sample_width
-		                                * data->enc->channels;
+		int nb_ch = moc_nb_channels (data->enc);
+		packed_size = frame->nb_samples * data->sample_width * nb_ch;
 
-		if (is_planar && data->enc->channels > 1) {
+		if (is_planar && nb_ch > 1) {
 			int sample, ch;
 
 			packed = xmalloc (packed_size);
 
 			for (sample = 0; sample < frame->nb_samples; sample += 1) {
-				for (ch = 0; ch < data->enc->channels; ch += 1)
-					memcpy (packed + (sample * data->enc->channels + ch)
+				for (ch = 0; ch < nb_ch; ch += 1)
+					memcpy (packed + (sample * nb_ch + ch)
 					                         * data->sample_width,
 					        (char *)frame->extended_data[ch] + sample * data->sample_width,
 					        data->sample_width);
@@ -1197,8 +1226,15 @@ static bool seek_in_stream (struct ffmpeg_data *data, int sec)
 		seek_ts += data->stream->start_time;
 	}
 
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59,0,100)
+	/* AVStream.cur_dts became private in FFmpeg 5; without it we can't tell
+	 * seek direction. Always set BACKWARD so the seek lands at-or-before
+	 * the target time (correct for audio playback in either direction). */
+	flags |= AVSEEK_FLAG_BACKWARD;
+#else
 	if (data->stream->cur_dts > seek_ts)
 		flags |= AVSEEK_FLAG_BACKWARD;
+#endif
 
 	rc = av_seek_frame (data->ic, data->stream->index, seek_ts, flags);
 	if (rc < 0) {
@@ -1238,7 +1274,7 @@ static int ffmpeg_decode (void *prv_data, char *buf, int buf_len,
 		return 0;
 
 	/* FFmpeg claims to always return native endian. */
-	sound_params->channels = data->enc->channels;
+	sound_params->channels = moc_nb_channels (data->enc);
 	sound_params->rate = data->enc->sample_rate;
 	sound_params->fmt = data->fmt | SFMT_NE;
 
@@ -1410,7 +1446,7 @@ static int ffmpeg_our_format_ext (const char *ext)
 
 static int ffmpeg_our_format_mime (const char *mime_type)
 {
-	AVOutputFormat *fmt;
+	const AVOutputFormat *fmt;
 
 	fmt = av_guess_format (NULL, NULL, mime_type);
 	return fmt ? 1 : 0;
