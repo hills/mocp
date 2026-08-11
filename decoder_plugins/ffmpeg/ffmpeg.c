@@ -1116,12 +1116,53 @@ static int decode_audio (AVCodecContext *ctx, AVFrame *frame,
 }
 #endif
 
+/* Copy samples from a decoded frame into the output or remainder buffer. */
+static int process_frame (struct ffmpeg_data *data, AVFrame *frame,
+                          char *buf, int *buf_len, int *filled)
+{
+	int is_planar, packed_size, copied;
+	int nb_ch = moc_nb_channels (data->enc);
+	char *packed;
+
+	if (frame->nb_samples == 0)
+		return 0;
+
+	is_planar = av_sample_fmt_is_planar (data->enc->sample_fmt);
+	packed = (char *)frame->extended_data[0];
+	packed_size = frame->nb_samples * data->sample_width * nb_ch;
+
+	if (is_planar && nb_ch > 1) {
+		int sample, ch;
+
+		packed = xmalloc (packed_size);
+
+		for (sample = 0; sample < frame->nb_samples; sample += 1) {
+			for (ch = 0; ch < nb_ch; ch += 1)
+				memcpy (packed + (sample * nb_ch + ch)
+				                         * data->sample_width,
+				        (char *)frame->extended_data[ch] + sample * data->sample_width,
+				        data->sample_width);
+		}
+	}
+
+	copied = copy_or_buffer (data, packed, packed_size, buf, *buf_len);
+	buf += copied;
+	*filled += copied;
+	*buf_len -= copied;
+
+	debug ("Copying %dB (%dB filled)", packed_size, *filled);
+
+	if (packed != (char *)frame->extended_data[0])
+		free (packed);
+
+	return copied;
+}
+
 /* Decode samples from packet data. */
 static int decode_packet (struct ffmpeg_data *data, AVPacket *pkt,
                           char *buf, int buf_len)
 {
 	int filled = 0;
-	char *packed;
 	AVFrame *frame;
 
 #ifdef HAVE_AV_FRAME_FNS
@@ -1130,8 +1171,42 @@ static int decode_packet (struct ffmpeg_data *data, AVPacket *pkt,
 	frame = avcodec_alloc_frame ();
 #endif
 
+#ifdef HAVE_AVCODEC_RECEIVE_FRAME
+	/* The send/receive API gives the decoder ownership of the packet, so
+	 * a single packet can yield many frames.  Send the packet once and
+	 * drain every frame it produces before moving on to the next packet;
+	 * this is the only way to get all samples out of codecs that buffer
+	 * input (e.g. APE). */
+	{
+		int rc = avcodec_send_packet (data->enc, pkt);
+
+		if (rc == 0 || rc == AVERROR(EAGAIN)) {
+			for (;;) {
+				int ret = avcodec_receive_frame (data->enc, frame);
+
+				if (ret == AVERROR(EAGAIN))
+					break;
+				if (ret == AVERROR_EOF) {
+					data->eos = data->eof;
+					break;
+				}
+				if (ret < 0) {
+					decoder_error (&data->error, ERROR_STREAM, 0,
+					               "Error in the stream!");
+					break;
+				}
+
+				process_frame (data, frame, buf, &buf_len, &filled);
+			}
+		}
+		else if (rc != AVERROR_EOF) {
+			decoder_error (&data->error, ERROR_STREAM, 0,
+			               "Error in the stream!");
+		}
+	}
+#else
 	do {
-		int len, got_frame, is_planar, packed_size, copied;
+		int len, got_frame;
 
 		len = decode_audio (data->enc, frame, &got_frame, pkt);
 
@@ -1152,38 +1227,9 @@ static int decode_packet (struct ffmpeg_data *data, AVPacket *pkt,
 			continue;
 		}
 
-		if (frame->nb_samples == 0)
-			continue;
-
-		is_planar = av_sample_fmt_is_planar (data->enc->sample_fmt);
-		packed = (char *)frame->extended_data[0];
-		int nb_ch = moc_nb_channels (data->enc);
-		packed_size = frame->nb_samples * data->sample_width * nb_ch;
-
-		if (is_planar && nb_ch > 1) {
-			int sample, ch;
-
-			packed = xmalloc (packed_size);
-
-			for (sample = 0; sample < frame->nb_samples; sample += 1) {
-				for (ch = 0; ch < nb_ch; ch += 1)
-					memcpy (packed + (sample * nb_ch + ch)
-					                         * data->sample_width,
-					        (char *)frame->extended_data[ch] + sample * data->sample_width,
-					        data->sample_width);
-			}
-		}
-
-		copied = copy_or_buffer (data, packed, packed_size, buf, buf_len);
-		buf += copied;
-		filled += copied;
-		buf_len -= copied;
-
-		debug ("Copying %dB (%dB filled)", packed_size, filled);
-
-		if (packed != (char *)frame->extended_data[0])
-			free (packed);
+		process_frame (data, frame, buf, &buf_len, &filled);
 	} while (pkt->size > 0);
+#endif
 
 #ifdef HAVE_AV_FRAME_FNS
 	av_frame_free (&frame);
